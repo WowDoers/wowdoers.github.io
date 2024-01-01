@@ -6,18 +6,18 @@
         <generator>Hugo -- gohugo.io</generator><language>zh-CN</language><managingEditor>wowdoers@gmail.com (辜月)</managingEditor>
             <webMaster>wowdoers@gmail.com (辜月)</webMaster><copyright>This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.</copyright><lastBuildDate>Fri, 29 Dec 2023 13:27:10 &#43;0800</lastBuildDate><atom:link href="https://wowdoers.github.io/posts/" rel="self" type="application/rss+xml" /><item>
     <title>聊聊 HTTP</title>
-    <link>https://wowdoers.github.io/%E8%81%8A%E8%81%8Ahttp/</link>
+    <link>https://wowdoers.github.io/%E8%81%8A%E8%81%8A-http/</link>
     <pubDate>Fri, 29 Dec 2023 13:27:10 &#43;0800</pubDate>
     <author>辜月</author>
-    <guid>https://wowdoers.github.io/%E8%81%8A%E8%81%8Ahttp/</guid>
+    <guid>https://wowdoers.github.io/%E8%81%8A%E8%81%8A-http/</guid>
     <description><![CDATA[写在前面 聊起 HTTP，总有一种熟悉又陌生的感觉。 HTTP 是每天都在打交道的基础网络组件。但中文网络上大多内容都是面向面试的&hellip; 系统性内]]></description>
 </item>
 <item>
     <title>缘由，亦或缘起</title>
-    <link>https://wowdoers.github.io/%E6%A0%B9/</link>
+    <link>https://wowdoers.github.io/%E7%BC%98%E7%94%B1%E4%BA%A6%E6%88%96%E7%BC%98%E8%B5%B7/</link>
     <pubDate>Wed, 27 Dec 2023 17:33:10 &#43;0800</pubDate>
     <author>辜月</author>
-    <guid>https://wowdoers.github.io/%E6%A0%B9/</guid>
+    <guid>https://wowdoers.github.io/%E7%BC%98%E7%94%B1%E4%BA%A6%E6%88%96%E7%BC%98%E8%B5%B7/</guid>
     <description><![CDATA[为什么想做博客~ 我在互联网做技术，也算大厂。但每天的工作内容比较枯燥。 国内的商业公司，经营利润和业务发展大多摆在极重要的位置。个人觉得，大多]]></description>
 </item>
 </channel>
