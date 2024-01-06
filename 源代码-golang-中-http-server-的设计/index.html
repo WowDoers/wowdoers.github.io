@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="robots" content="noodp" />
+        <title>源代码 —— Golang 中 HTTP Server 的设计 - 辜月</title><meta name="Description" content="Hugo theme - LoveIt"><meta property="og:title" content="源代码 —— Golang 中 HTTP Server 的设计" />
+<meta property="og:description" content="写在前面 本文将通过 Golang 源码研究其 HTTP Server 的核心实现。 研究对象主要是 Golang SDK net/http 包下的 server.go。 HTTP 应用工作模式 一个经典的基于 HTTP 协议的应用系统，其" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://wowdoers.github.io/%E6%BA%90%E4%BB%A3%E7%A0%81-golang-%E4%B8%AD-http-server-%E7%9A%84%E8%AE%BE%E8%AE%A1/" /><meta property="og:image" content="https://wowdoers.github.io/logo.png" /><meta property="article:section" content="posts" />
+<meta property="article:published_time" content="2024-01-02T16:22:22+08:00" />
+<meta property="article:modified_time" content="2024-01-06T16:55:32+08:00" /><meta property="og:site_name" content="LoveIt" />
+
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://wowdoers.github.io/logo.png" /><meta name="twitter:title" content="源代码 —— Golang 中 HTTP Server 的设计"/>
+<meta name="twitter:description" content="写在前面 本文将通过 Golang 源码研究其 HTTP Server 的核心实现。 研究对象主要是 Golang SDK net/http 包下的 server.go。 HTTP 应用工作模式 一个经典的基于 HTTP 协议的应用系统，其"/>
+<meta name="application-name" content="辜月">
+<meta name="apple-mobile-web-app-title" content="辜月"><meta name="theme-color" content="#ffffff"><meta name="msapplication-TileColor" content="#da532c"><link rel="shortcut icon" type="image/x-icon" href="/favicon.ico" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"><link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5"><link rel="manifest" href="/site.webmanifest"><link rel="canonical" href="https://wowdoers.github.io/%E6%BA%90%E4%BB%A3%E7%A0%81-golang-%E4%B8%AD-http-server-%E7%9A%84%E8%AE%BE%E8%AE%A1/" /><link rel="prev" href="https://wowdoers.github.io/%E8%81%8A%E8%81%8A-http/" /><link rel="stylesheet" href="/css/style.min.css"><link rel="preload" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.1.1/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.1.1/css/all.min.css"></noscript><link rel="preload" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+        <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css"></noscript><script type="application/ld+json">
+    {
+        "@context": "http://schema.org",
+        "@type": "BlogPosting",
+        "headline": "源代码 —— Golang 中 HTTP Server 的设计",
+        "inLanguage": "zh-CN",
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": "https:\/\/wowdoers.github.io\/%E6%BA%90%E4%BB%A3%E7%A0%81-golang-%E4%B8%AD-http-server-%E7%9A%84%E8%AE%BE%E8%AE%A1\/"
+        },"image": [{
+                            "@type": "ImageObject",
+                            "url": "https:\/\/wowdoers.github.io\/images\/Apple-Devices-Preview.png",
+                            "width":  3200 ,
+                            "height":  2048 
+                        }],"genre": "posts","keywords": "Golang, HTTP, 计算机网络","wordcount":  3443 ,
+        "url": "https:\/\/wowdoers.github.io\/%E6%BA%90%E4%BB%A3%E7%A0%81-golang-%E4%B8%AD-http-server-%E7%9A%84%E8%AE%BE%E8%AE%A1\/","datePublished": "2024-01-02T16:22:22+08:00","dateModified": "2024-01-06T16:55:32+08:00","license": "This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.","publisher": {
+            "@type": "Organization",
+            "name": "xxxx","logo": {
+                    "@type": "ImageObject",
+                    "url": "https:\/\/wowdoers.github.io\/images\/avatar.png",
+                    "width":  1200 ,
+                    "height":  1198 
+                }},"author": {
+                "@type": "Person",
+                "name": "辜月"
+            },"description": ""
+    }
+    </script></head>
+    <body data-header-desktop="fixed" data-header-mobile="auto"><script type="text/javascript">(window.localStorage && localStorage.getItem('theme') ? localStorage.getItem('theme') === 'dark' : ('auto' === 'auto' ? window.matchMedia('(prefers-color-scheme: dark)').matches : 'auto' === 'dark')) && document.body.setAttribute('theme', 'dark');</script>
+
+        <div id="mask"></div><div class="wrapper"><header class="desktop" id="header-desktop">
+    <div class="header-wrapper">
+        <div class="header-title">
+            <a href="/" title="辜月"><span class="header-title-pre"><i class='fas fa-terminal' aria-hidden='true'></i></span>辜月</a>
+        </div>
+        <div class="menu">
+            <div class="menu-inner"><a class="menu-item" href="/posts/"> 所有文章 </a><a class="menu-item" href="/tags/"> 标签 </a><a class="menu-item" href="/categories/"> 分类 </a><a class="menu-item" href="/categories/documentation/"> 文档 </a><a class="menu-item" href="/about/"> 关于 </a><a class="menu-item" href="https://github.com/WowDoers" title="GitHub" rel="noopener noreffer" target="_blank"><i class='fab fa-github fa-fw' aria-hidden='true'></i>  </a><span class="menu-item delimiter"></span><span class="menu-item search" id="search-desktop">
+                        <input type="text" placeholder="搜索文章标题或内容..." id="search-input-desktop">
+                        <a href="javascript:void(0);" class="search-button search-toggle" id="search-toggle-desktop" title="搜索">
+                            <i class="fas fa-search fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <a href="javascript:void(0);" class="search-button search-clear" id="search-clear-desktop" title="清空">
+                            <i class="fas fa-times-circle fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <span class="search-button search-loading" id="search-loading-desktop">
+                            <i class="fas fa-spinner fa-fw fa-spin" aria-hidden="true"></i>
+                        </span>
+                    </span><a href="javascript:void(0);" class="menu-item theme-switch" title="切换主题">
+                    <i class="fas fa-adjust fa-fw" aria-hidden="true"></i>
+                </a></div>
+        </div>
+    </div>
+</header><header class="mobile" id="header-mobile">
+    <div class="header-container">
+        <div class="header-wrapper">
+            <div class="header-title">
+                <a href="/" title="辜月"><span class="header-title-pre"><i class='fas fa-terminal' aria-hidden='true'></i></span>辜月</a>
+            </div>
+            <div class="menu-toggle" id="menu-toggle-mobile">
+                <span></span><span></span><span></span>
+            </div>
+        </div>
+        <div class="menu" id="menu-mobile"><div class="search-wrapper">
+                    <div class="search mobile" id="search-mobile">
+                        <input type="text" placeholder="搜索文章标题或内容..." id="search-input-mobile">
+                        <a href="javascript:void(0);" class="search-button search-toggle" id="search-toggle-mobile" title="搜索">
+                            <i class="fas fa-search fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <a href="javascript:void(0);" class="search-button search-clear" id="search-clear-mobile" title="清空">
+                            <i class="fas fa-times-circle fa-fw" aria-hidden="true"></i>
+                        </a>
+                        <span class="search-button search-loading" id="search-loading-mobile">
+                            <i class="fas fa-spinner fa-fw fa-spin" aria-hidden="true"></i>
+                        </span>
+                    </div>
+                    <a href="javascript:void(0);" class="search-cancel" id="search-cancel-mobile">
+                        取消
+                    </a>
+                </div><a class="menu-item" href="/posts/" title="">所有文章</a><a class="menu-item" href="/tags/" title="">标签</a><a class="menu-item" href="/categories/" title="">分类</a><a class="menu-item" href="/categories/documentation/" title="">文档</a><a class="menu-item" href="/about/" title="">关于</a><a class="menu-item" href="https://github.com/WowDoers" title="GitHub" rel="noopener noreffer" target="_blank"><i class='fab fa-github fa-fw' aria-hidden='true'></i></a><a href="javascript:void(0);" class="menu-item theme-switch" title="切换主题">
+                <i class="fas fa-adjust fa-fw" aria-hidden="true"></i>
+            </a></div>
+    </div>
+</header><div class="search-dropdown desktop">
+        <div id="search-dropdown-desktop"></div>
+    </div>
+    <div class="search-dropdown mobile">
+        <div id="search-dropdown-mobile"></div>
+    </div><main class="main">
+                <div class="container"><div class="toc" id="toc-auto">
+            <h2 class="toc-title">目录</h2>
+            <div class="toc-content" id="toc-content-auto"></div>
+        </div><article class="page single"><h1 class="single-title animate__animated animate__flipInX">源代码 —— Golang 中 HTTP Server 的设计</h1><div class="post-meta">
+            <div class="post-meta-line"><span class="post-author"><a href="https://wowdoers.github.io/" title="Author" target="_blank" rel="noopener noreffer author" class="author"><i class="fas fa-user-circle fa-fw" aria-hidden="true"></i>辜月</a></span>&nbsp;<span class="post-category">收录于 <a href="/categories/%E6%BA%90%E4%BB%A3%E7%A0%81/"><i class="far fa-folder fa-fw" aria-hidden="true"></i>源代码</a></span></div>
+            <div class="post-meta-line"><i class="far fa-calendar-alt fa-fw" aria-hidden="true"></i>&nbsp;<time datetime="2024-01-02">2024-01-02</time>&nbsp;<i class="fas fa-pencil-alt fa-fw" aria-hidden="true"></i>&nbsp;约 3443 字&nbsp;
+                <i class="far fa-clock fa-fw" aria-hidden="true"></i>&nbsp;预计阅读 7 分钟&nbsp;<span id="/%E6%BA%90%E4%BB%A3%E7%A0%81-golang-%E4%B8%AD-http-server-%E7%9A%84%E8%AE%BE%E8%AE%A1/" class="leancloud_visitors" data-flag-title="源代码 —— Golang 中 HTTP Server 的设计">
+                        <i class="far fa-eye fa-fw" aria-hidden="true"></i>&nbsp;<span class=leancloud-visitors-count></span>&nbsp;次阅读
+                    </span>&nbsp;</div>
+        </div><div class="details toc" id="toc-static"  data-kept="">
+                <div class="details-summary toc-title">
+                    <span>目录</span>
+                    <span><i class="details-icon fas fa-angle-right" aria-hidden="true"></i></span>
+                </div>
+                <div class="details-content toc-content" id="toc-content-static"><nav id="TableOfContents">
+  <ul>
+    <li><a href="#写在前面">写在前面</a></li>
+    <li><a href="#http-应用工作模式">HTTP 应用工作模式</a></li>
+    <li><a href="#golang-中-http-server-的核心实现">Golang 中 HTTP Server 的核心实现</a>
+      <ul>
+        <li><a href="#从一个-demo-入手">从一个 demo 入手</a></li>
+        <li><a href="#顺藤摸瓜">顺藤摸瓜</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+            </div><div class="content" id="content"><h2 id="写在前面">写在前面</h2>
+<p>本文将通过 Golang 源码研究其 HTTP Server 的核心实现。</p>
+<p>研究对象主要是 Golang SDK <code>net/http</code> 包下的 <code>server.go</code>。</p>
+<h2 id="http-应用工作模式">HTTP 应用工作模式</h2>
+<p>一个经典的基于 HTTP 协议的应用系统，其工作模式可以简单表示为以下流程：</p>
+<p><figure><a class="lightgallery" href="/images/C-S%E7%BB%8F%E5%85%B8%E6%9E%B6%E6%9E%84.jpg" title="C-S 架构应用流程" data-thumbnail="/images/C-S%E7%BB%8F%E5%85%B8%E6%9E%B6%E6%9E%84.jpg" data-sub-html="<h2>C-S 架构应用流程</h2><p>C-S 架构应用流程</p>">
+        <img
+            class="lazyload"
+            src="/svg/loading.min.svg"
+            data-src="/images/C-S%E7%BB%8F%E5%85%B8%E6%9E%B6%E6%9E%84.jpg"
+            data-srcset="/images/C-S%E7%BB%8F%E5%85%B8%E6%9E%B6%E6%9E%84.jpg, /images/C-S%E7%BB%8F%E5%85%B8%E6%9E%B6%E6%9E%84.jpg 1.5x, /images/C-S%E7%BB%8F%E5%85%B8%E6%9E%B6%E6%9E%84.jpg 2x"
+            data-sizes="auto"
+            alt="/images/C-S%E7%BB%8F%E5%85%B8%E6%9E%B6%E6%9E%84.jpg" width="928" height="830" />
+    </a><figcaption class="image-caption">C-S 架构应用流程</figcaption>
+    </figure></p>
+<p>具体来说，请求 <code>Request</code> 由客户端发出，服务端接收请求后，通过路由组件匹配到相应的处理器，处理器处理 <code>Request</code> 后构建 <code>Response</code> 返回给客户端。</p>
+<h2 id="golang-中-http-server-的核心实现">Golang 中 HTTP Server 的核心实现</h2>
+<blockquote>
+<p>Golang HTTP Server 的核心实现也遵循上述基本流程</p>
+</blockquote>
+<h3 id="从一个-demo-入手">从一个 demo 入手</h3>
+<blockquote>
+<p>研究源码实现, 个人认为比较好的入手方式是写一个 demo，先跑起来~</p>
+</blockquote>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;net/http&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// 一种 http handler 的实现方式
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">indexHandler</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">fmt</span><span class="p">.</span><span class="nf">printf</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="s">&#34;Hello World!&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// 另一种实现方式
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">type</span> <span class="nx">otherIndexHandler</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">data</span> <span class="kt">string</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">ih</span> <span class="o">*</span><span class="nx">otherIndexHandler</span><span class="p">)</span> <span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">fmt</span><span class="p">.</span><span class="nf">printf</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">ih</span><span class="p">.</span><span class="nx">data</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 第一种调用方式
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">http</span><span class="p">.</span><span class="nf">HandleFunc</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="nx">indexHandler</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">http</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">(</span><span class="s">&#34;:8080&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// 第二种调用方式
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">http</span><span class="p">.</span><span class="nf">Handle</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">otherIndexHandler</span><span class="p">{</span><span class="nx">data</span><span class="p">:</span> <span class="s">&#34;Hello World!&#34;</span><span class="p">})</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">http</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">(</span><span class="s">&#34;:8081&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>是的，这就实现了一个极简的 HTTP Server！
+<br></br>
+简单分析一下这段代码：通过不同的方式定义 <code>handler</code>，并使用 Go 的标准库 <code>http</code> 注册 <code>handler</code> 到指定的路由，最后再启动对特定端口的监听。</p>
+<ul>
+<li>
+<p>第一种 <code>handler</code> 实现，<code>indexHandler</code> 是自定义的 <code>handler</code>，拥有 <code>http.ResponseWriter</code> 接口和 <code>http.Request</code> 结构体作为入参，函数实现非常简单，输出 &ldquo;Hello World!&quot;。</p>
+</li>
+<li>
+<p>第二种 <code>handler</code> 实现，我定义了一个 <code>otherIndexHandler</code> 结构体，并实现了 Go <code>http</code> 标准库中 <code>Handler</code> 接口的 <code>ServeHTTP(ResponseWriter, *Request)</code> 函数，因此，<code>otherIndexHandler</code> 就实现了 <code>Handler</code> 接口。</p>
+</li>
+</ul>
+<h3 id="顺藤摸瓜">顺藤摸瓜</h3>
+<blockquote>
+<p>带着问题看源码，往往更有针对性，且不容易迷失在源码的各种分支细节里。</p>
+</blockquote>
+<p><i class="fa-regular fa-circle-question"></i> <strong>上述 demo 采用了两种方式启动一个 HTTP Server，有什么区别？</strong>
+<br></br></p>
+<ul>
+<li>
+<p>第一种使用函数作为 <code>handler</code>，优点是简洁，适合简单逻辑；局限性是如果 <code>handler</code> 要维护状态或者访问其他字段，就必须使用全局变量或者闭包了。</p>
+</li>
+<li>
+<p>第二种使用结构体实现 <code>handler</code>，可以很方便地为 <code>handler</code> 添加字段以存储状态或者其他数据、也可以定义很多方法，按照不同的路由或者请求类型进行处理，且有利于代码的组织和复用，局限性自然就是实现起来复杂些。</p>
+</li>
+</ul>
+<p><br></br>
+<i class="fa-regular fa-circle-question"></i> <strong>从软件工程复用性的角度考虑，底层标准库不太可能为上层应用做不同的实现，因此猜想 <code>http.HandleFunc</code> 和 <code>http.Handle</code> 最终的实现可能是一样的，甚至是同一个函数？</strong>
+<br></br>
+(1) <code>http.HandleFunc</code> 源码实现：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">DefaultServeMux</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">defaultServeMux</span>
+</span></span><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">defaultServeMux</span> <span class="nx">ServeMux</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">HandleFunc</span><span class="p">(</span><span class="nx">pattern</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="o">*</span><span class="nx">Request</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">DefaultServeMux</span><span class="p">.</span><span class="nf">HandleFunc</span><span class="p">(</span><span class="nx">pattern</span><span class="p">,</span> <span class="nx">handler</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">mux</span> <span class="o">*</span><span class="nx">ServeMux</span><span class="p">)</span> <span class="nf">HandleFunc</span><span class="p">(</span><span class="nx">pattern</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="o">*</span><span class="nx">Request</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">handler</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;http: nil handler&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 调用 ServeMux 的 Handle 函数
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">mux</span><span class="p">.</span><span class="nf">Handle</span><span class="p">(</span><span class="nx">pattern</span><span class="p">,</span> <span class="nf">HandlerFunc</span><span class="p">(</span><span class="nx">handler</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p><br></br>
+(2) <code>http.Handle</code> 源码实现：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">Handle</span><span class="p">(</span><span class="nx">pattern</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">Handler</span><span class="p">)</span> <span class="p">{</span> 
+</span></span><span class="line"><span class="cl">    <span class="c1">// DefaultServeMux 是 ServeMux 类型的指针
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 因此这也相当于调用 ServeMux 的 Handle 函数
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">DefaultServeMux</span><span class="p">.</span><span class="nf">Handle</span><span class="p">(</span><span class="nx">pattern</span><span class="p">,</span> <span class="nx">handler</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>可以看到，两种方式最终都是依赖了 <code>ServeMux</code> 的 <code>Handle</code> 函数，所以下一步重点是研究它。
+<br></br>
+需要注意的是，<code>mux.Handle(pattern, HandlerFunc(handler))</code> 这行，因为 <code>ServeMux.Handle</code> 函数需要一个 <code>Handler</code> 接口类型的入参，因此这里使用了 <code>HandlerFunc</code> 将入参的 <code>handler</code> 转换为了 <code>Handler</code> 接口类型，具体原理可以在以下源码中看到：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">Handler</span> <span class="kd">interface</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="o">*</span><span class="nx">Request</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="nx">HandlerFunc</span><span class="p">)</span> <span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">w</span> <span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nf">f</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">r</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">mux</span> <span class="o">*</span><span class="nx">ServeMux</span><span class="p">)</span> <span class="nf">HandleFunc</span><span class="p">(</span><span class="nx">pattern</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="o">*</span><span class="nx">Request</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">handler</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;http: nil handler&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">mux</span><span class="p">.</span><span class="nf">Handle</span><span class="p">(</span><span class="nx">pattern</span><span class="p">,</span> <span class="nf">HandlerFunc</span><span class="p">(</span><span class="nx">handler</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>这里其实运用了适配器设计模式，具体来说，其实是接口和类型的适配器模式，<code>HandlerFunc</code> 函数通过实现 <code>ServeHTTP</code> 方法，实现了 <code>Handler</code> 接口，再通过 <code>HandlerFunc(handler)</code> 将普通函数 <code>handler</code> 转为 <code>Handler</code> 这个接口类型。这是 Go 语言中接口的一种常见用法：通过定义函数类型并为该类型实现接口，我们可以将其他函数通过类型转换特性，转作接口类型的值来使用，从而实现了函数和接口类型之间的适配。
+<br></br>
+<i class="fa-regular fa-circle-question"></i> <strong><code>ServeMux</code> 是什么？</strong></p>
+<p><code>ServeMux</code> 是一个很重要的结构体 —— HTTP 请求的多路复用器（<code>Multiplexer</code>，也常被称为 Mux），作用是将传入的请求 URL 与预定义的模式列表做匹配，并将匹配成功的请求分发给相应的处理函数 (handler)</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">ServeMux</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">mu</span>    <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">m</span>     <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">muxEntry</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">es</span>    <span class="p">[]</span><span class="nx">muxEntry</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">hosts</span> <span class="kt">bool</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">muxEntry</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">h</span>       <span class="nx">Handler</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">pattern</span> <span class="kt">string</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>
+<p><code>mu</code> 是一个读写器互斥锁，该锁可以由任意数量的读取器或单个写入器持有，这里非本文主线，不展开其实现细节，知道特性就行。</p>
+</li>
+<li>
+<p><code>m</code> 是一个 <code>map</code>，其元素是结构体类型 <code>muxEntry</code>，负责保存 <code>pattern</code> 和对应 <code>handler</code> 的映射关系。</p>
+</li>
+<li>
+<p><code>es</code> 是一个切片，它存储了所有的路由规则并按照一定规则进行排序。
+<br></br></p>
+</li>
+</ul>
+<p><i class="fa-regular fa-circle-question"></i> <strong><code>ServeMux.Handle</code> 函数的工作流程是什么？</strong></p>
+<p>源码如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">mux</span> <span class="o">*</span><span class="nx">ServeMux</span><span class="p">)</span> <span class="nf">Handle</span><span class="p">(</span><span class="nx">pattern</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">Handler</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">mux</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">mux</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">pattern</span> <span class="o">==</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;http: invalid pattern&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">handler</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;http: nil handler&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">exist</span> <span class="o">:=</span> <span class="nx">mux</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">pattern</span><span class="p">];</span> <span class="nx">exist</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;http: multiple registrations for &#34;</span> <span class="o">+</span> <span class="nx">pattern</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">mux</span><span class="p">.</span><span class="nx">m</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">mux</span><span class="p">.</span><span class="nx">m</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="nx">muxEntry</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">e</span> <span class="o">:=</span> <span class="nx">muxEntry</span><span class="p">{</span><span class="nx">h</span><span class="p">:</span> <span class="nx">handler</span><span class="p">,</span> <span class="nx">pattern</span><span class="p">:</span> <span class="nx">pattern</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">mux</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">pattern</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">pattern</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="nx">pattern</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;/&#39;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">mux</span><span class="p">.</span><span class="nx">es</span> <span class="p">=</span> <span class="nf">appendSorted</span><span class="p">(</span><span class="nx">mux</span><span class="p">.</span><span class="nx">es</span><span class="p">,</span> <span class="nx">e</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">pattern</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="sc">&#39;/&#39;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">mux</span><span class="p">.</span><span class="nx">hosts</span> <span class="p">=</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">appendSorted</span><span class="p">(</span><span class="nx">es</span> <span class="p">[]</span><span class="nx">muxEntry</span><span class="p">,</span> <span class="nx">e</span> <span class="nx">muxEntry</span><span class="p">)</span> <span class="p">[]</span><span class="nx">muxEntry</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">n</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">es</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 使用 sort.Search 函数查找 muxEntry 应该插入的位置。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// sort.Search 函数接受一个长度 n 和一个函数 f，并返回满足 f(i) 为真的最小的 i。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 在这里，f(i) 函数检查 es[i].pattern 的长度是否小于 e.pattern 的长度。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 这个搜索过程是二分搜索，所以时间复杂度为O(log n)。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">i</span> <span class="o">:=</span> <span class="nx">sort</span><span class="p">.</span><span class="nf">Search</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="nx">es</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">pattern</span><span class="p">)</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">pattern</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">})</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// 如果应插入的位置 i 等于切片的长度 n，说明 e 应该被插入到切片的尾部
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 那就直接使用 append 函数将 e 添加到切片的尾部并返回结果
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">if</span> <span class="nx">i</span> <span class="o">==</span> <span class="nx">n</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nb">append</span><span class="p">(</span><span class="nx">es</span><span class="p">,</span> <span class="nx">e</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// 如果应插入的位置 i 小于切片的长度 n，说明 e 应该被插入到切片的中间位置。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 首先，使用 append 函数将一个空的 muxEntry 添加到切片的尾部，让切片的长度增加 1。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 然后，使用 copy 函数将 i 位置及之后的元素向后移动一位，为插入 e 腾出空间。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 最后，将 e 复制到 i 位置。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">es</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">es</span><span class="p">,</span> <span class="nx">muxEntry</span><span class="p">{})</span>
+</span></span><span class="line"><span class="cl">	<span class="nb">copy</span><span class="p">(</span><span class="nx">es</span><span class="p">[</span><span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">:],</span> <span class="nx">es</span><span class="p">[</span><span class="nx">i</span><span class="p">:])</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">es</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nx">e</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">es</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>源码逻辑比较简单：</p>
+<ul>
+<li>
+<p>先加读写互斥锁，保证对 <code>ServeMux.mu</code> 和 <code>ServeMux.m</code> 的并发读写操作是线程安全的，避免数据不一致或者数据竞态等问题。</p>
+</li>
+<li>
+<p>接下来是一些校验，这里有一个逻辑，<code>mux.m</code> 不支持对同一个模式（pattern）重复注册 <code>Handler</code>，这里有一个编码技巧：对 <code>exist</code> 的判断和对 <code>mux.m == nil</code> 的判断逻辑的先后顺序，从结果上来说，这两块逻辑可以调换，不会有问题，标准库这里实现的优化是：如果 <code>pattern</code> 已经存在于 <code>mux.m</code> 中，就没必要再创建一个新的 <code>map</code> 了。</p>
+</li>
+<li>
+<p>接下来创建一个新的 <code>muxEntry</code>，将传入的 <code>handler</code> 和 <code>pattern</code> 映射写入；接着检查传入的模式字符串 <code>pattern</code> 是否以 <code>/</code> 字符结束，如果是，则通过 <code>appendSorted</code> 函数将这个新的 <code>muxEntry</code> 插入到 <code>mux.es</code> 切片的合适位置，以保持切片的排序顺序（appendSorted 的实现逻辑见上方注释）。从 <code>appendSorted</code> 函数的实现也可以确认，<code>es</code> 中 <code>pattern</code> 长度是逐渐递减的，即 <code>mux</code> 对 <code>pattern</code> 的匹配遵循最长匹配原则，而不是精准匹配，这样好处是比较灵活，尤其是对 <code>RESTful</code> 风格的 API 设计比较友好，可以更灵活地处理复杂的 URL 结构。</p>
+</li>
+</ul>
+<p><br></br>
+注册路由 Handler 的流程到此告一段落。
+接下来看看启动服务的流程。
+<br></br></p>
+<p><i class="fa-regular fa-circle-question"></i> <strong><code>http.ListenAndServe</code> 函数做了些什么？</strong></p>
+<p>依然从源码入手</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">ListenAndServe</span><span class="p">(</span><span class="nx">addr</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">Handler</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">server</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Server</span><span class="p">{</span><span class="nx">Addr</span><span class="p">:</span> <span class="nx">addr</span><span class="p">,</span> <span class="nx">Handler</span><span class="p">:</span> <span class="nx">handler</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">server</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>可以看到，核心就是根据传入的路由地址和处理器，生成 <code>Server</code> 结构体实例，然后调用 <code>server.ListenAndServe()</code> 函数。</p>
+<p><code>server.ListenAndServe()</code> 实现如下：</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">ListenAndServe</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">shuttingDown</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">ErrServerClosed</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">addr</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">Addr</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">addr</span> <span class="o">==</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">addr</span> <span class="p">=</span> <span class="s">&#34;:http&#34;</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ln</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">Listen</span><span class="p">(</span><span class="s">&#34;tcp&#34;</span><span class="p">,</span> <span class="nx">addr</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">Serve</span><span class="p">(</span><span class="nx">ln</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>逻辑相对简单，核心是 <code>ln, err := net.Listen(&quot;tcp&quot;, addr)</code> 开启一个 TCP Listener，然后调用 <code>Server</code> 的 <code>Serve</code> 函数</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">Serve</span><span class="p">(</span><span class="nx">l</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Listener</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="nx">testHookServerServe</span><span class="p">;</span> <span class="nx">fn</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">fn</span><span class="p">(</span><span class="nx">srv</span><span class="p">,</span> <span class="nx">l</span><span class="p">)</span> <span class="c1">// call hook with unwrapped listener
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// 保存原始 Listener, 将传入的 Listener 使用 onceCloseListener 
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 包装起来，确保在函数返回时只关闭一次监听器
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">origListener</span> <span class="o">:=</span> <span class="nx">l</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">l</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">onceCloseListener</span><span class="p">{</span><span class="nx">Listener</span><span class="p">:</span> <span class="nx">l</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">l</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">setupHTTP2_Serve</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// 将 Listener 添加到其内部跟踪列表中，以便可以优雅地关闭
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">srv</span><span class="p">.</span><span class="nf">trackListener</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">ErrServerClosed</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">trackListener</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// 为连接创建基础上下文(context.Context), 实际上是一个空的 struct
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">baseCtx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">BaseContext</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">baseCtx</span> <span class="p">=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">BaseContext</span><span class="p">(</span><span class="nx">origListener</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">baseCtx</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;BaseContext returned a nil context&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">tempDelay</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span> <span class="c1">// how long to sleep on accept failure
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ctx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithValue</span><span class="p">(</span><span class="nx">baseCtx</span><span class="p">,</span> <span class="nx">ServerContextKey</span><span class="p">,</span> <span class="nx">srv</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">rw</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nf">Accept</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">shuttingDown</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="k">return</span> <span class="nx">ErrServerClosed</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="k">if</span> <span class="nx">ne</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">err</span><span class="p">.(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Error</span><span class="p">);</span> <span class="nx">ok</span> <span class="o">&amp;&amp;</span> <span class="nx">ne</span><span class="p">.</span><span class="nf">Temporary</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="k">if</span> <span class="nx">tempDelay</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="nx">tempDelay</span> <span class="p">=</span> <span class="mi">5</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="nx">tempDelay</span> <span class="o">*=</span> <span class="mi">2</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">				<span class="k">if</span> <span class="nx">max</span> <span class="o">:=</span> <span class="mi">1</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">;</span> <span class="nx">tempDelay</span> <span class="p">&gt;</span> <span class="nx">max</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="nx">tempDelay</span> <span class="p">=</span> <span class="nx">max</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">srv</span><span class="p">.</span><span class="nf">logf</span><span class="p">(</span><span class="s">&#34;http: Accept error: %v; retrying in %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">,</span> <span class="nx">tempDelay</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">tempDelay</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">				<span class="k">continue</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">connCtx</span> <span class="o">:=</span> <span class="nx">ctx</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">cc</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">ConnContext</span><span class="p">;</span> <span class="nx">cc</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">connCtx</span> <span class="p">=</span> <span class="nf">cc</span><span class="p">(</span><span class="nx">connCtx</span><span class="p">,</span> <span class="nx">rw</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="k">if</span> <span class="nx">connCtx</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;ConnContext returned nil&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">tempDelay</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">c</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">newConn</span><span class="p">(</span><span class="nx">rw</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">c</span><span class="p">.</span><span class="nf">setState</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">rwc</span><span class="p">,</span> <span class="nx">StateNew</span><span class="p">,</span> <span class="nx">runHooks</span><span class="p">)</span> <span class="c1">// before Serve can return
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">go</span> <span class="nx">c</span><span class="p">.</span><span class="nf">serve</span><span class="p">(</span><span class="nx">connCtx</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>这部分实现较长，我提取几个关建点出来（其余流程见代码注释）：</p>
+<ul>
+<li>
+<p><code>setupHTTP2_Serve</code> 遵循 HTTP/2 协议。</p>
+</li>
+<li>
+<p>为连接准备好上下文后，服务器会进入一个无限循环，等待新的连接。<code>tempDelay</code> 用于在网络 <code>Accept</code> 调用失败时实施指数退避。</p>
+</li>
+<li>
+<p><code>go c.serve(connCtx)</code> 对于每一个新的连接上下文，会开启一个新的 <code>go</code> 协程来执行任务。这体现了 Go 对 HTTP Server 的并发支持。</p>
+</li>
+<li>
+<p><code>Server.Serve</code> 封装了接受连接和处理连接的逻辑， <code>Serve</code> 方法仅处理监听和分派连接，并不关心具体的业务逻辑 —— 单一职责原则。</p>
+</li>
+<li>
+<p>上下文管理：通过 <code>context.Context</code> 在协程间安全地传递数据和取消信号。
+<br></br></p>
+</li>
+</ul>
+<p><i class="fa-regular fa-circle-question"></i> <strong><code>c.serve()</code> 函数如何处理客户端请求并返回响应？</strong></p>
+<p>这部分源码较长，以下是主要流程</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">conn</span><span class="p">)</span> <span class="nf">serve</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 前置准备，对连接和上下文的一些处理
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">w</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">readRequest</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        
+</span></span><span class="line"><span class="cl">        <span class="c1">// ... 一些错误处理
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">        <span class="nx">serverHandler</span><span class="p">{</span><span class="nx">c</span><span class="p">.</span><span class="nx">server</span><span class="p">}.</span><span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">w</span><span class="p">.</span><span class="nx">req</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">sh</span> <span class="nx">serverHandler</span><span class="p">)</span> <span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">rw</span> <span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">req</span> <span class="o">*</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">handler</span> <span class="o">:=</span> <span class="nx">sh</span><span class="p">.</span><span class="nx">srv</span><span class="p">.</span><span class="nx">Handler</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">handler</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">handler</span> <span class="p">=</span> <span class="nx">DefaultServeMux</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="p">!</span><span class="nx">sh</span><span class="p">.</span><span class="nx">srv</span><span class="p">.</span><span class="nx">DisableGeneralOptionsHandler</span> <span class="o">&amp;&amp;</span> <span class="nx">req</span><span class="p">.</span><span class="nx">RequestURI</span> <span class="o">==</span> <span class="s">&#34;*&#34;</span> <span class="o">&amp;&amp;</span> <span class="nx">req</span><span class="p">.</span><span class="nx">Method</span> <span class="o">==</span> <span class="s">&#34;OPTIONS&#34;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">handler</span> <span class="p">=</span> <span class="nx">globalOptionsHandler</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="nx">handler</span><span class="p">.</span><span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">rw</span><span class="p">,</span> <span class="nx">req</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>可以看到，在读取请求后，通过 <code>serverHandler{c.server}.ServeHTTP(w, w.req)</code> 进行了请求分发和处理，在我的 demo 中，实际是使用了 <code>DefaultServeMux</code> 中存储的 handler 映射来处理请求的。</p>
+<p><br></br></p>
+<p>至此，Golang server 启动一个 HTTP 服务并对客户端请求进行处理的主要流程就分析完毕！</p>
+<!-- 引入 fontawesome 支持 -->
+<head> 
+    <script defer src="https://use.fontawesome.com/releases/v5.0.13/js/all.js"></script> 
+    <script defer src="https://use.fontawesome.com/releases/v5.0.13/js/v4-shims.js"></script> 
+</head> 
+<link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.0.13/css/all.css"></div><div class="post-footer" id="post-footer">
+    <div class="post-info">
+        <div class="post-info-line">
+            <div class="post-info-mod">
+                <span>更新于 2024-01-06&nbsp;<a class="git-hash" href="https://github.com/dillonzq/LoveIt/commit/aac586c7ddd817d31edadc056416ec54ccd0dbb1" target="_blank" title="commit by fuxian(liuwang.liu@alibaba-inc.com) aac586c7ddd817d31edadc056416ec54ccd0dbb1: feat: 源代码Golang中HTTPServer的设计">
+                                    <i class="fas fa-hashtag fa-fw" aria-hidden="true"></i>aac586c</a></span>
+            </div></div>
+        <div class="post-info-line">
+            <div class="post-info-md"><span>
+                            <a class="link-to-markdown" href="/%E6%BA%90%E4%BB%A3%E7%A0%81-golang-%E4%B8%AD-http-server-%E7%9A%84%E8%AE%BE%E8%AE%A1/index.md" target="_blank">阅读原始文档</a>
+                        </span></div>
+            <div class="post-info-share">
+                <span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="post-info-more">
+        <section class="post-tags"><i class="fas fa-tags fa-fw" aria-hidden="true"></i>&nbsp;<a href="/tags/golang/">Golang</a>,&nbsp;<a href="/tags/http/">HTTP</a>,&nbsp;<a href="/tags/%E8%AE%A1%E7%AE%97%E6%9C%BA%E7%BD%91%E7%BB%9C/">计算机网络</a></section>
+        <section>
+            <span><a href="javascript:void(0);" onclick="window.history.back();">返回</a></span>&nbsp;|&nbsp;<span><a href="/">主页</a></span>
+        </section>
+    </div>
+
+    <div class="post-nav"><a href="/%E8%81%8A%E8%81%8A-http/" class="prev" rel="prev" title="聊聊 HTTP"><i class="fas fa-angle-left fa-fw" aria-hidden="true"></i>聊聊 HTTP</a></div>
+</div>
+<div id="comments"><div id="valine" class="comment"></div><noscript>
+                Please enable JavaScript to view the comments powered by <a href="https://valine.js.org/">Valine</a>.
+            </noscript></div></article></div>
+            </main><footer class="footer">
+        <div class="footer-container"><div class="footer-line">由 <a href="https://gohugo.io/" target="_blank" rel="noopener noreffer" title="Hugo 0.121.1">Hugo</a> 强力驱动 | 主题 - <a href="https://github.com/dillonzq/LoveIt" target="_blank" rel="noopener noreffer" title="LoveIt 0.2.11"><i class="far fa-kiss-wink-heart fa-fw" aria-hidden="true"></i> LoveIt</a>
+                </div><div class="footer-line" itemscope itemtype="http://schema.org/CreativeWork"><i class="far fa-copyright fa-fw" aria-hidden="true"></i><span itemprop="copyrightYear">2023 - 2024</span><span class="author" itemprop="copyrightHolder">&nbsp;<a href="https://wowdoers.github.io/" target="_blank">辜月</a></span></div>
+        </div>
+    </footer></div>
+
+        <div id="fixed-buttons"><a href="#" id="back-to-top" class="fixed-button" title="回到顶部">
+                <i class="fas fa-arrow-up fa-fw" aria-hidden="true"></i>
+            </a><a href="#" id="view-comments" class="fixed-button" title="查看评论">
+                <i class="fas fa-comment fa-fw" aria-hidden="true"></i>
+            </a>
+        </div><link rel="stylesheet" href="/lib/valine/valine.min.css"><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/valine@1.5.0/dist/Valine.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/autocomplete.js@0.38.1/dist/autocomplete.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lunr@2.3.9/lunr.min.js"></script><script type="text/javascript" src="/lib/lunr/lunr.stemmer.support.min.js"></script><script type="text/javascript" src="/lib/lunr/lunr.zh.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/lazysizes@5.3.2/lazysizes.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/clipboard@2.0.11/dist/clipboard.min.js"></script><script type="text/javascript" src="https://cdn.jsdelivr.net/npm/sharer.js@0.5.1/sharer.min.js"></script><script type="text/javascript">window.config={"code":{"copyTitle":"复制到剪贴板","maxShownLines":50},"comment":{"valine":{"appId":"QGzwQXOqs5JOhN4RGPOkR2mR-MdYXbMMI","appKey":"WBmoGyJtbqUswvfLh6L8iEBr","avatar":"mp","el":"#valine","emojiCDN":"https://cdn.jsdelivr.net/npm/emoji-datasource-google@14.0.0/img/google/64/","emojiMaps":{"100":"1f4af.png","alien":"1f47d.png","anger":"1f4a2.png","angry":"1f620.png","anguished":"1f627.png","astonished":"1f632.png","black_heart":"1f5a4.png","blue_heart":"1f499.png","blush":"1f60a.png","bomb":"1f4a3.png","boom":"1f4a5.png","broken_heart":"1f494.png","brown_heart":"1f90e.png","clown_face":"1f921.png","cold_face":"1f976.png","cold_sweat":"1f630.png","confounded":"1f616.png","confused":"1f615.png","cry":"1f622.png","crying_cat_face":"1f63f.png","cupid":"1f498.png","dash":"1f4a8.png","disappointed":"1f61e.png","disappointed_relieved":"1f625.png","dizzy":"1f4ab.png","dizzy_face":"1f635.png","drooling_face":"1f924.png","exploding_head":"1f92f.png","expressionless":"1f611.png","face_vomiting":"1f92e.png","face_with_cowboy_hat":"1f920.png","face_with_hand_over_mouth":"1f92d.png","face_with_head_bandage":"1f915.png","face_with_monocle":"1f9d0.png","face_with_raised_eyebrow":"1f928.png","face_with_rolling_eyes":"1f644.png","face_with_symbols_on_mouth":"1f92c.png","face_with_thermometer":"1f912.png","fearful":"1f628.png","flushed":"1f633.png","frowning":"1f626.png","ghost":"1f47b.png","gift_heart":"1f49d.png","green_heart":"1f49a.png","grimacing":"1f62c.png","grin":"1f601.png","grinning":"1f600.png","hankey":"1f4a9.png","hear_no_evil":"1f649.png","heart":"2764-fe0f.png","heart_decoration":"1f49f.png","heart_eyes":"1f60d.png","heart_eyes_cat":"1f63b.png","heartbeat":"1f493.png","heartpulse":"1f497.png","heavy_heart_exclamation_mark_ornament":"2763-fe0f.png","hole":"1f573-fe0f.png","hot_face":"1f975.png","hugging_face":"1f917.png","hushed":"1f62f.png","imp":"1f47f.png","innocent":"1f607.png","japanese_goblin":"1f47a.png","japanese_ogre":"1f479.png","joy":"1f602.png","joy_cat":"1f639.png","kiss":"1f48b.png","kissing":"1f617.png","kissing_cat":"1f63d.png","kissing_closed_eyes":"1f61a.png","kissing_heart":"1f618.png","kissing_smiling_eyes":"1f619.png","laughing":"1f606.png","left_speech_bubble":"1f5e8-fe0f.png","love_letter":"1f48c.png","lying_face":"1f925.png","mask":"1f637.png","money_mouth_face":"1f911.png","nauseated_face":"1f922.png","nerd_face":"1f913.png","neutral_face":"1f610.png","no_mouth":"1f636.png","open_mouth":"1f62e.png","orange_heart":"1f9e1.png","partying_face":"1f973.png","pensive":"1f614.png","persevere":"1f623.png","pleading_face":"1f97a.png","pouting_cat":"1f63e.png","purple_heart":"1f49c.png","rage":"1f621.png","relaxed":"263a-fe0f.png","relieved":"1f60c.png","revolving_hearts":"1f49e.png","right_anger_bubble":"1f5ef-fe0f.png","robot_face":"1f916.png","rolling_on_the_floor_laughing":"1f923.png","scream":"1f631.png","scream_cat":"1f640.png","see_no_evil":"1f648.png","shushing_face":"1f92b.png","skull":"1f480.png","skull_and_crossbones":"2620-fe0f.png","sleeping":"1f634.png","sleepy":"1f62a.png","slightly_frowning_face":"1f641.png","slightly_smiling_face":"1f642.png","smile":"1f604.png","smile_cat":"1f638.png","smiley":"1f603.png","smiley_cat":"1f63a.png","smiling_face_with_3_hearts":"1f970.png","smiling_imp":"1f608.png","smirk":"1f60f.png","smirk_cat":"1f63c.png","sneezing_face":"1f927.png","sob":"1f62d.png","space_invader":"1f47e.png","sparkling_heart":"1f496.png","speak_no_evil":"1f64a.png","speech_balloon":"1f4ac.png","star-struck":"1f929.png","stuck_out_tongue":"1f61b.png","stuck_out_tongue_closed_eyes":"1f61d.png","stuck_out_tongue_winking_eye":"1f61c.png","sunglasses":"1f60e.png","sweat":"1f613.png","sweat_drops":"1f4a6.png","sweat_smile":"1f605.png","thinking_face":"1f914.png","thought_balloon":"1f4ad.png","tired_face":"1f62b.png","triumph":"1f624.png","two_hearts":"1f495.png","unamused":"1f612.png","upside_down_face":"1f643.png","weary":"1f629.png","white_frowning_face":"2639-fe0f.png","white_heart":"1f90d.png","wink":"1f609.png","woozy_face":"1f974.png","worried":"1f61f.png","yawning_face":"1f971.png","yellow_heart":"1f49b.png","yum":"1f60b.png","zany_face":"1f92a.png","zipper_mouth_face":"1f910.png","zzz":"1f4a4.png"},"enableQQ":false,"highlight":true,"lang":"zh-CN","pageSize":10,"placeholder":"你的评论 ...","recordIP":true,"serverURLs":"https://leancloud.hugoloveit.com","visitor":true}},"search":{"highlightTag":"em","lunrIndexURL":"/index.json","lunrLanguageCode":"zh","lunrSegmentitURL":"/lib/lunr/lunr.segmentit.js","maxResultLength":10,"noResultsFound":"没有找到结果","snippetLength":50,"type":"lunr"}};</script><script type="text/javascript" src="/js/theme.min.js"></script></body>
+</html>
